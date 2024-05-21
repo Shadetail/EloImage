@@ -16,13 +16,12 @@ How to Use:
 6. The Elo ratings will be updated after each vote, and the images will be renamed to reflect their current Elo ratings.
 7. If the script detects that either of the images in the current pair was in the previous pair, it will automatically skip to a new pair. Maximum of 3 auto skips in a row to prevent infinite loop.
 8. You can manually skip a pair by pressing the Spacebar.
-9. mappings.txt file will be placed in the Elo folder as well. It is used to map original images to images inside of Elo folder since we don't want to display images that are being constantly renamed as that leads to trouble. This file is also used to store the number of matchups that each image had, in order to proide a more balanced pseudorandom choice of images (to avoid randomizing the same image many times while almost never randomizing some other image).
-10. To exit the script, press the Escape key.
+9. To exit the script, press the Escape key.
 
 Session Resumption:
 - If you need to resume a session, drag and drop the 'Elo' folder onto the script. The script will load the existing ratings and continue from where you left off.
 
 Note:
-- Ensure that the folder path is valid and contains images.
+- Mappings.txt file will be placed in the Elo folder as well. It is used to map original images to images inside of Elo folder since we don't want to display images that are being constantly renamed as that leads to trouble. This file is also used to store the number of matchups that each image had, in order to proide a more balanced pseudorandom choice of images (to avoid randomizing the same image many times while almost never randomizing some other image).
 - The script will display detailed debug information in the console, including comparisons and skip actions.
-- I made this using GPT4 and GPT4o over the course of two days.
+- I made this using GPT4 and GPT4o, took around 10 hours.
