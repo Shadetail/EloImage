@@ -106,7 +106,8 @@ class ImageEloApp:
         with open(self.mappings_file, 'r') as f:
             for line in f:
                 original_file, identifier, matchups = line.strip().split('::')
-                original_path = os.path.join(os.path.dirname(self.folder_path), original_file)
+                base_dir = self.folder_path if not self.folder_path.endswith('Elo') else os.path.dirname(self.folder_path)
+                original_path = os.path.join(base_dir, original_file)
                 elo_files = [f for f in os.listdir(self.elo_folder_path) if f.endswith(f"_{identifier}{os.path.splitext(original_file)[1]}")]
                 if elo_files:
                     elo_path = os.path.join(self.elo_folder_path, elo_files[0])
