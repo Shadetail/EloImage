@@ -17,6 +17,7 @@ How to Use:
 7. If the script detects that either of the images in the current pair was in the previous pair, it will automatically skip to a new pair.
 8. You can manually skip a pair by pressing the Spacebar.
 9. To exit the script, press the Escape key.
+10. A small progress indicator appears at the bottom-center in the form "A / B": A is the total number of pairwise votes cast so far in this folder, and B is a theoretical lower bound on the number of pairwise votes needed to fully order n images, computed as ceil(log2(n!)). The numbers update after each vote.
 
 Session Resumption:
 - If you need to resume a session, drag and drop the 'Elo' folder onto the script. The script will load the existing ratings and continue from where you left off.
@@ -33,6 +34,7 @@ from PIL import Image, ImageTk
 import random
 import string
 import shutil
+import math
 
 class ImageEloApp:
     def __init__(self, root, folder_path):
@@ -72,12 +74,18 @@ class ImageEloApp:
         self.right_label = tk.Label(self.center_frame, bg='black')
         self.right_label.pack(side="right", padx=(10, 0), fill=tk.BOTH, expand=True)
 
+        self.bottom_frame = tk.Frame(self.root, bg='black')
+        self.bottom_frame.pack(side="bottom", fill=tk.X)
+        self.progress_label = tk.Label(self.bottom_frame, text="", fg="#666666", bg="black")
+        self.progress_label.pack(pady=8)
+
     def check_and_initialize(self):
         if os.path.exists(self.mappings_file):
             self.load_mappings()
         else:
             self.populate_elo_folder()
         self.load_images()
+        self.update_progress_label()
 
     def populate_elo_folder(self):
         alphabet = string.ascii_lowercase
@@ -171,6 +179,20 @@ class ImageEloApp:
         label.config(image=photo)
         label.image = photo
 
+    def min_votes(self, n: int) -> int:
+        # exact, stable: log2(n!) = lgamma(n+1)/ln 2
+        return math.ceil(math.lgamma(n + 1) / math.log(2))
+
+    def compute_total_votes(self) -> int:
+        # Each vote increments two images' matchup counters
+        return (sum(self.image_matchups.values()) // 2) if self.image_matchups else 0
+
+    def update_progress_label(self):
+        a = self.compute_total_votes()
+        b = self.min_votes(len(self.images)) if self.images else 0
+        if hasattr(self, "progress_label"):
+            self.progress_label.config(text=f"{a} / {b}")
+
     def skip_matchup(self, skip_attempts=0):
         print("Skipping matchup...")  # Debug print
         self.display_images(skip_attempts)
@@ -185,6 +207,7 @@ class ImageEloApp:
         self.image_matchups[loser] += 1
         self.update_elo_ratings(winner, loser)
         self.update_mappings_file()
+        self.update_progress_label()
         self.display_images()
 
     def update_elo_ratings(self, winner, loser, k=32):
