@@ -54,7 +54,7 @@ def parse_name(basename_no_ext: str) -> Optional[Tuple[int, str]]:
     if m:
         try:
             elo = int(m.group('elo'))
-            ident = m.group('id'))
+            ident = m.group('id')
             return elo, ident
         except ValueError:
             return None
