@@ -57,6 +57,7 @@ class ImageEloApp:
         self.image_mappings = {}  # Maps Elo filenames to original filenames
         self.previous_pair = []  # Stores the previous pair of images for comparison
         self.current_pair = []  # Initialize to avoid attribute error
+        self._deck = []  # Shuffled deck for round-robin image selection
         self.session_action_count = 0
         self.session_total_duration = 0.0
         self.pair_display_time = None
@@ -144,41 +145,33 @@ class ImageEloApp:
                 self.image_ratings[path] = int(file.split('_')[0])
         self.display_images()
 
+    def _refill_deck(self):
+        """Reshuffle all images into the deck, pushing recently-seen images to the end."""
+        deck = list(self.images)
+        random.shuffle(deck)
+        # Move recently-shown images to the end so they appear last
+        for img in self.previous_pair:
+            if img in deck:
+                deck.remove(img)
+                deck.append(img)
+        self._deck = deck
+
+    def _draw_pair(self):
+        """Draw two images from the shuffled deck, refilling when needed."""
+        if len(self._deck) < 2:
+            self._refill_deck()
+        return [self._deck.pop(0), self._deck.pop(0)]
+
     def display_images(self, skip_attempts=0):
         if len(self.images) < 2:
             print("Not enough images to compare.")
             return
 
-        min_matchups = min(self.image_matchups.values())
-        candidate_images = [img for img in self.images if self.image_matchups[img] == min_matchups]
-
-        # Relax criteria if there are not enough candidates
-        if len(candidate_images) < 2:
-            next_min_matchups = min(val for val in self.image_matchups.values() if val > min_matchups)
-            candidate_images += [img for img in self.images if self.image_matchups[img] == next_min_matchups]
-
-        self.current_pair = random.sample(candidate_images, 2)
+        self.current_pair = self._draw_pair()
         current_ids = [self.get_identifier(img) for img in self.current_pair]
-        previous_ids = [self.get_identifier(img) for img in self.previous_pair]
         print(f"Selected pair: {current_ids}")  # Debug print
 
-        skip_needed = False
-        checks = []
-        for cur_img in current_ids:
-            for prev_img in previous_ids:
-                check = f"is {cur_img} = {prev_img}? {'yes' if cur_img == prev_img else 'no'}"
-                checks.append(check)
-                if cur_img == prev_img:
-                    skip_needed = True
-        for check in checks:
-            print(check)  # Print each comparison
-        if skip_needed and skip_attempts < 3:
-            print("Skipping due to match with previous pair")
-            self.skip_matchup(skip_attempts + 1)
-            return
-
         self.previous_pair = self.current_pair
-        print("Current pair after check:", current_ids)  # Debug statement
         self.update_image(self.left_label, self.current_pair[0])
         self.update_image(self.right_label, self.current_pair[1])
         self.pair_display_time = time.time()
@@ -289,6 +282,11 @@ class ImageEloApp:
         self.image_mappings[new_path] = self.image_mappings.pop(path)  # Update the mappings dictionary
         self.image_matchups[new_path] = self.image_matchups.pop(path)  # Update the matchups dictionary
         self.images[self.images.index(path)] = new_path  # Update the image list
+        if path in self._deck:
+            self._deck[self._deck.index(path)] = new_path  # Update the deck
+        # Keep pair references current
+        self.previous_pair = [new_path if p == path else p for p in self.previous_pair]
+        self.current_pair = [new_path if p == path else p for p in self.current_pair]
 
     def update_mappings_file(self):
         with open(self.mappings_file, 'w') as f:
@@ -331,6 +329,8 @@ class ImageEloApp:
         del self.image_ratings[image_path]
         del self.image_matchups[image_path]
         del self.image_mappings[image_path]
+        if image_path in self._deck:
+            self._deck.remove(image_path)
 
         # Delete file from disk
         os.remove(image_path)
