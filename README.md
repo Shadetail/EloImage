@@ -18,20 +18,24 @@ Images are displayed in pairs and you vote for the better one. Elo ratings are s
 |-----|--------|
 | `←` / `→` | Vote for the left / right image |
 | `Ctrl+←` / `Ctrl+→` | Delete the left / right image |
+| `Backspace` | Undo the last vote or delete |
 | `Space` | Skip the current pair |
 | `Escape` | Exit |
 
 ## Voting
 
 - After each vote the Elo ratings of both images are updated and the files are renamed accordingly.
-- Pairs are chosen to prioritise images with the fewest matchups, ensuring a balanced distribution before any image is seen many times.
-- If either image in the newly selected pair appeared in the previous pair, the script auto-skips up to 3 times to avoid back-to-back repeats.
+- Pairs are drawn from a shuffled deck of all images. Every image appears once before any image repeats, ensuring maximum variety and preventing the same image from showing up back-to-back.
 
 ## Deleting Images
 
 Press `Ctrl+←` or `Ctrl+→` to mark an image for deletion. The selected image dims to 50% brightness and a confirmation dialog appears. Confirming removes the file from disk and from the competition entirely. If the pool drops to fewer than 2 images after a deletion the session ends gracefully.
 
 This mode is useful for culling: repeatedly delete the weaker image until you are left with only the ones worth keeping.
+
+## Undo
+
+Press `Backspace` to undo the last vote or delete (1 step). Undoing a vote restores both images' ratings, matchup counts, and filenames. Undoing a delete restores the image file to disk and re-adds it to the competition. In both cases the original pair is re-displayed so you can decide again.
 
 ## Progress Indicators
 
