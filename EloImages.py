@@ -13,11 +13,15 @@ How to Use:
 5. Use the arrow keys to vote for the better image:
    - Left Arrow: Vote for the left image
    - Right Arrow: Vote for the right image
+   - Ctrl+Left: Delete the left image (with confirmation)
+   - Ctrl+Right: Delete the right image (with confirmation)
 6. The Elo ratings will be updated after each vote, and the images will be renamed to reflect their current Elo ratings.
-7. If the script detects that either of the images in the current pair was in the previous pair, it will automatically skip to a new pair.
-8. You can manually skip a pair by pressing the Spacebar.
-9. To exit the script, press the Escape key.
-10. A small progress indicator appears at the bottom-center in the form "A / B": A is the total number of pairwise votes cast so far in this folder, and B is a theoretical lower bound on the number of pairwise votes needed to fully order n images, computed as ceil(log2(n!)). The numbers update after each vote.
+7. When deleting an image, the image will dim to indicate selection, and a confirmation dialog will appear.
+   Confirming deletion removes the image from disk and from the competition. The progress indicator updates accordingly.
+8. If the script detects that either of the images in the current pair was in the previous pair, it will automatically skip to a new pair.
+9. You can manually skip a pair by pressing the Spacebar.
+10. To exit the script, press the Escape key.
+11. A small progress indicator appears at the bottom-center in the form "A / B": A is the total number of pairwise votes cast so far in this folder, and B is a theoretical lower bound on the number of pairwise votes needed to fully order n images, computed as ceil(log2(n!)). The numbers update after each vote.
 
 Session Resumption:
 - If you need to resume a session, drag and drop the 'Elo' folder onto the script. The script will load the existing ratings and continue from where you left off.
@@ -29,8 +33,10 @@ Note:
 
 import os
 import sys
+import time
 import tkinter as tk
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageEnhance
+from tkinter import messagebox
 import random
 import string
 import shutil
@@ -51,6 +57,9 @@ class ImageEloApp:
         self.image_mappings = {}  # Maps Elo filenames to original filenames
         self.previous_pair = []  # Stores the previous pair of images for comparison
         self.current_pair = []  # Initialize to avoid attribute error
+        self.session_action_count = 0
+        self.session_total_duration = 0.0
+        self.pair_display_time = None
 
         self.setup_gui()
         if not os.path.isdir(self.elo_folder_path):
@@ -65,6 +74,8 @@ class ImageEloApp:
         self.root.bind('<Right>', lambda e: self.vote_winner(1))
         self.root.bind('<Left>', lambda e: self.vote_winner(0))
         self.root.bind('<space>', lambda e: self.skip_matchup())  # Bind space key to skip feature
+        self.root.bind('<Control-Left>', lambda e: self.confirm_delete(0))  # Delete left image
+        self.root.bind('<Control-Right>', lambda e: self.confirm_delete(1))  # Delete right image
 
         self.center_frame = tk.Frame(self.root, bg='black')
         self.center_frame.pack(expand=True)
@@ -76,8 +87,10 @@ class ImageEloApp:
 
         self.bottom_frame = tk.Frame(self.root, bg='black')
         self.bottom_frame.pack(side="bottom", fill=tk.X)
+        self.count_label = tk.Label(self.bottom_frame, text="", fg="#666666", bg="black")
+        self.count_label.pack(pady=(8, 0))
         self.progress_label = tk.Label(self.bottom_frame, text="", fg="#666666", bg="black")
-        self.progress_label.pack(pady=8)
+        self.progress_label.pack(pady=(0, 8))
 
     def check_and_initialize(self):
         if os.path.exists(self.mappings_file):
@@ -168,6 +181,7 @@ class ImageEloApp:
         print("Current pair after check:", current_ids)  # Debug statement
         self.update_image(self.left_label, self.current_pair[0])
         self.update_image(self.right_label, self.current_pair[1])
+        self.pair_display_time = time.time()
 
     def get_identifier(self, path):
         return os.path.splitext(os.path.basename(path))[0].split('_')[1]
@@ -180,6 +194,32 @@ class ImageEloApp:
         label.config(image=photo)
         label.image = photo
 
+    def _record_action(self):
+        if self.pair_display_time is not None:
+            self.session_total_duration += time.time() - self.pair_display_time
+            self.session_action_count += 1
+
+    def _get_avg_seconds_per_action(self):
+        if self.session_action_count == 0:
+            return None
+        return self.session_total_duration / self.session_action_count
+
+    def format_duration(self, seconds):
+        if seconds is None:
+            return ""
+        seconds = max(0, int(seconds))
+        d, rem = divmod(seconds, 86400)
+        h, rem = divmod(rem, 3600)
+        m, s = divmod(rem, 60)
+        parts = []
+        if d: parts.append(f"{d}d")
+        if h: parts.append(f"{h}h")
+        if m: parts.append(f"{m}min")
+        if s or not parts: parts.append(f"{s}sec")
+        if d:  # drop seconds when estimate is in days
+            parts = [p for p in parts if not p.endswith("sec")]
+        return " ".join(parts)
+
     def min_votes(self, n: int) -> int:
         # exact, stable: log2(n!) = lgamma(n+1)/ln 2
         return math.ceil(math.lgamma(n + 1) / math.log(2))
@@ -189,10 +229,24 @@ class ImageEloApp:
         return (sum(self.image_matchups.values()) // 2) if self.image_matchups else 0
 
     def update_progress_label(self):
+        n = len(self.images)
         a = self.compute_total_votes()
-        b = self.min_votes(len(self.images)) if self.images else 0
+        b = self.min_votes(n) if n else 0
+        avg = self._get_avg_seconds_per_action()
+
+        del_timer = self.format_duration(avg * (n - 1)) if avg is not None else ""
+        rating_timer = self.format_duration(avg * max(0, b - a)) if avg is not None else ""
+
+        if hasattr(self, "count_label"):
+            text = f"{n}"
+            if del_timer:
+                text += f"  —  {del_timer}"
+            self.count_label.config(text=text)
         if hasattr(self, "progress_label"):
-            self.progress_label.config(text=f"{a} / {b}")
+            text = f"{a} / {b}"
+            if rating_timer:
+                text += f"  —  {rating_timer}"
+            self.progress_label.config(text=text)
 
     def skip_matchup(self, skip_attempts=0):
         print("Skipping matchup...")  # Debug print
@@ -208,6 +262,7 @@ class ImageEloApp:
         self.image_matchups[loser] += 1
         self.update_elo_ratings(winner, loser)
         self.update_mappings_file()
+        self._record_action()
         self.update_progress_label()
         self.display_images()
 
@@ -241,6 +296,60 @@ class ImageEloApp:
                 identifier = self.get_identifier(path)
                 matchups = self.image_matchups[path]
                 f.write(f"{os.path.basename(original_path)}::{identifier}::{matchups}\n")
+
+    def confirm_delete(self, side_index):
+        if not self.current_pair:
+            return
+        image_path = self.current_pair[side_index]
+        label = self.left_label if side_index == 0 else self.right_label
+        side_name = "LEFT" if side_index == 0 else "RIGHT"
+
+        # Dim the image to 50% brightness
+        img = Image.open(image_path)
+        img.thumbnail((self.root.winfo_screenwidth() // 2, self.root.winfo_screenheight()), Image.LANCZOS)
+        enhancer = ImageEnhance.Brightness(img)
+        dimmed = enhancer.enhance(0.5)
+        dimmed_photo = ImageTk.PhotoImage(dimmed)
+        original_photo = label.image
+        label.config(image=dimmed_photo)
+        label.image = dimmed_photo
+        self.root.update()
+
+        # Show confirmation dialog
+        result = messagebox.askyesno("Confirm Delete", f"Delete the {side_name} image?")
+
+        if result:
+            self.delete_image(image_path)
+        else:
+            # Restore original image
+            label.config(image=original_photo)
+            label.image = original_photo
+
+    def delete_image(self, image_path):
+        # Remove from all data structures
+        self.images.remove(image_path)
+        del self.image_ratings[image_path]
+        del self.image_matchups[image_path]
+        del self.image_mappings[image_path]
+
+        # Delete file from disk
+        os.remove(image_path)
+        print(f"Deleted: {os.path.basename(image_path)}")
+
+        # Update mappings file
+        self.update_mappings_file()
+
+        # Check if enough images remain
+        if len(self.images) < 2:
+            messagebox.showinfo("Session Complete", f"Only {len(self.images)} image(s) remaining. Exiting.")
+            self.root.quit()
+            return
+
+        # Clear previous pair to avoid skip issues and display new pair
+        self.previous_pair = []
+        self._record_action()
+        self.update_progress_label()
+        self.display_images()
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
