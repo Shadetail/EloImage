@@ -58,6 +58,7 @@ class ImageEloApp:
         self.previous_pair = []  # Stores the previous pair of images for comparison
         self.current_pair = []  # Initialize to avoid attribute error
         self._deck = []  # Shuffled deck for round-robin image selection
+        self._undo_state = None  # Stores state for 1-step undo
         self.session_action_count = 0
         self.session_total_duration = 0.0
         self.pair_display_time = None
@@ -77,6 +78,7 @@ class ImageEloApp:
         self.root.bind('<space>', lambda e: self.skip_matchup())  # Bind space key to skip feature
         self.root.bind('<Control-Left>', lambda e: self.confirm_delete(0))  # Delete left image
         self.root.bind('<Control-Right>', lambda e: self.confirm_delete(1))  # Delete right image
+        self.root.bind('<BackSpace>', lambda e: self.undo())  # Undo last action
 
         self.center_frame = tk.Frame(self.root, bg='black')
         self.center_frame.pack(expand=True)
@@ -245,19 +247,111 @@ class ImageEloApp:
         print("Skipping matchup...")  # Debug print
         self.display_images(skip_attempts)
 
+    def undo(self):
+        if self._undo_state is None:
+            print("Nothing to undo.")
+            return
+
+        state = self._undo_state
+        self._undo_state = None
+
+        if state["type"] == "vote":
+            self._undo_vote(state)
+        elif state["type"] == "delete":
+            self._undo_delete(state)
+
+    def _undo_vote(self, state):
+        # Rename files back to pre-vote paths
+        for pre_path, post_path in zip(state["pre_paths"], state["post_paths"]):
+            if pre_path != post_path:
+                os.rename(post_path, pre_path)
+                self.image_mappings[pre_path] = self.image_mappings.pop(post_path)
+                self.image_ratings.pop(post_path)
+                self.image_matchups.pop(post_path)
+                self.images[self.images.index(post_path)] = pre_path
+            self.image_ratings[pre_path] = state["pre_ratings"][pre_path]
+            self.image_matchups[pre_path] = state["pre_matchups"][pre_path]
+
+        self._deck = list(state["deck"])
+        self.previous_pair = list(state["previous_pair"])
+        self.session_action_count = state["session_action_count"]
+        self.session_total_duration = state["session_total_duration"]
+        self.update_mappings_file()
+        self.update_progress_label()
+
+        # Re-display the original pair
+        self.current_pair = list(state["pre_paths"])
+        self.update_image(self.left_label, self.current_pair[0])
+        self.update_image(self.right_label, self.current_pair[1])
+        self.pair_display_time = time.time()
+        print(f"Undid vote. Restored pair: {[self.get_identifier(p) for p in self.current_pair]}")
+
+    def _undo_delete(self, state):
+        path = state["deleted_path"]
+
+        # Restore file to disk
+        with open(path, 'wb') as f:
+            f.write(state["file_bytes"])
+
+        # Restore to data structures
+        self.images.insert(state["index_in_images"], path)
+        self.image_ratings[path] = state["rating"]
+        self.image_matchups[path] = state["matchups"]
+        self.image_mappings[path] = state["mapping"]
+
+        self._deck = list(state["deck"])
+        self.previous_pair = list(state["previous_pair"])
+        self.session_action_count = state["session_action_count"]
+        self.session_total_duration = state["session_total_duration"]
+        self.update_mappings_file()
+        self.update_progress_label()
+
+        # Re-display the original pair
+        self.current_pair = list(state["pair"])
+        self.update_image(self.left_label, self.current_pair[0])
+        self.update_image(self.right_label, self.current_pair[1])
+        self.pair_display_time = time.time()
+        print(f"Undid delete. Restored: {os.path.basename(path)}")
+
     def vote_winner(self, winner_index):
         if not self.current_pair:
             return
+
+        # Capture pre-vote state for undo
+        pair = list(self.current_pair)
+        pre_ratings = {p: self.image_ratings[p] for p in pair}
+        pre_matchups = {p: self.image_matchups[p] for p in pair}
+        pre_deck = list(self._deck)
+        pre_previous_pair = list(self.previous_pair)
+        pre_action_count = self.session_action_count
+        pre_duration = self.session_total_duration
+
         loser_index = 1 - winner_index
         winner = self.current_pair[winner_index]
         loser = self.current_pair[loser_index]
         self.image_matchups[winner] += 1
         self.image_matchups[loser] += 1
         self.update_elo_ratings(winner, loser)
+
+        # Capture post-rename paths (rename_image updated self.current_pair)
+        post_paths = list(self.current_pair)
+
         self.update_mappings_file()
         self._record_action()
         self.update_progress_label()
         self.display_images()
+
+        self._undo_state = {
+            "type": "vote",
+            "pre_paths": pair,
+            "post_paths": post_paths,
+            "pre_ratings": pre_ratings,
+            "pre_matchups": pre_matchups,
+            "deck": pre_deck,
+            "previous_pair": pre_previous_pair,
+            "session_action_count": pre_action_count,
+            "session_total_duration": pre_duration,
+        }
 
     def update_elo_ratings(self, winner, loser, k=32):
         winner_rating = self.image_ratings[winner]
@@ -324,6 +418,24 @@ class ImageEloApp:
             label.image = original_photo
 
     def delete_image(self, image_path):
+        # Capture undo state before deleting
+        with open(image_path, 'rb') as f:
+            file_bytes = f.read()
+        undo = {
+            "type": "delete",
+            "pair": list(self.current_pair),
+            "deleted_path": image_path,
+            "file_bytes": file_bytes,
+            "rating": self.image_ratings[image_path],
+            "matchups": self.image_matchups[image_path],
+            "mapping": self.image_mappings[image_path],
+            "index_in_images": self.images.index(image_path),
+            "deck": list(self._deck),
+            "previous_pair": list(self.previous_pair),
+            "session_action_count": self.session_action_count,
+            "session_total_duration": self.session_total_duration,
+        }
+
         # Remove from all data structures
         self.images.remove(image_path)
         del self.image_ratings[image_path]
@@ -350,6 +462,8 @@ class ImageEloApp:
         self._record_action()
         self.update_progress_label()
         self.display_images()
+
+        self._undo_state = undo
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
