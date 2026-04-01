@@ -30,7 +30,7 @@ Images are displayed in pairs and you vote for the better one. Elo ratings are s
 
 ## Deleting Images
 
-Press `Ctrl+←` or `Ctrl+→` to mark an image for deletion. The selected image dims to 50% brightness and a confirmation dialog appears. Confirming removes the file from disk and from the competition entirely. If the pool drops to fewer than 2 images after a deletion the session ends gracefully.
+Press `Ctrl+←` or `Ctrl+→` to mark an image for deletion. The selected image dims to 50% brightness and a confirmation dialog appears. Confirming counts as a vote for the surviving image (its Elo rating increases), then removes the deleted file from disk and from the competition entirely. If the pool drops to fewer than 2 images after a deletion the session ends gracefully.
 
 Press `Delete` to delete both images at once. Both images dim and a confirmation dialog appears. This is handy when neither image in the pair is worth keeping.
 

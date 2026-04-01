@@ -18,7 +18,8 @@ How to Use:
    - Delete: Delete both images (with confirmation)
 6. The Elo ratings will be updated after each vote, and the images will be renamed to reflect their current Elo ratings.
 7. When deleting an image, the image will dim to indicate selection, and a confirmation dialog will appear.
-   Confirming deletion removes the image from disk and from the competition. The progress indicator updates accordingly.
+   Confirming deletion counts as a vote for the surviving image (its Elo rating increases), then removes the
+   deleted image from disk and from the competition. The progress indicator updates accordingly.
 8. If the script detects that either of the images in the current pair was in the previous pair, it will automatically skip to a new pair.
 9. You can manually skip a pair by pressing the Spacebar.
 10. To exit the script, press the Escape key.
@@ -291,17 +292,27 @@ class ImageEloApp:
         print(f"Undid vote. Restored pair: {[self.get_identifier(p) for p in self.current_pair]}")
 
     def _undo_delete(self, state):
-        path = state["deleted_path"]
-
-        # Restore file to disk
-        with open(path, 'wb') as f:
+        # Restore deleted file at its pre-vote path
+        pre_path = state["deleted_pre_path"]
+        with open(pre_path, 'wb') as f:
             f.write(state["file_bytes"])
 
-        # Restore to data structures
-        self.images.insert(state["index_in_images"], path)
-        self.image_ratings[path] = state["rating"]
-        self.image_matchups[path] = state["matchups"]
-        self.image_mappings[path] = state["mapping"]
+        self.images.insert(state["deleted_index_in_images"], pre_path)
+        self.image_ratings[pre_path] = state["deleted_pre_rating"]
+        self.image_matchups[pre_path] = state["deleted_pre_matchups"]
+        self.image_mappings[pre_path] = state["deleted_pre_mapping"]
+
+        # Revert surviving image's rating boost
+        surv_post = state["surviving_post_path"]
+        surv_pre = state["surviving_pre_path"]
+        if surv_post != surv_pre:
+            os.rename(surv_post, surv_pre)
+            self.image_mappings[surv_pre] = self.image_mappings.pop(surv_post)
+            self.image_ratings.pop(surv_post)
+            self.image_matchups.pop(surv_post)
+            self.images[self.images.index(surv_post)] = surv_pre
+        self.image_ratings[surv_pre] = state["surviving_pre_rating"]
+        self.image_matchups[surv_pre] = state["surviving_pre_matchups"]
 
         self._deck = list(state["deck"])
         self.previous_pair = list(state["previous_pair"])
@@ -315,7 +326,7 @@ class ImageEloApp:
         self.update_image(self.left_label, self.current_pair[0])
         self.update_image(self.right_label, self.current_pair[1])
         self.pair_display_time = time.time()
-        print(f"Undid delete. Restored: {os.path.basename(path)}")
+        print(f"Undid delete. Restored: {os.path.basename(pre_path)}")
 
     def _undo_delete_both(self, state):
         # Restore both files in original order (reverse so indices stay valid)
@@ -440,7 +451,7 @@ class ImageEloApp:
         result = messagebox.askyesno("Confirm Delete", f"Delete the {side_name} image?")
 
         if result:
-            self.delete_image(image_path)
+            self.delete_image(side_index)
         else:
             # Restore original image
             label.config(image=original_photo)
@@ -528,36 +539,67 @@ class ImageEloApp:
 
         self._undo_state = undo
 
-    def delete_image(self, image_path):
-        # Capture undo state before deleting
-        with open(image_path, 'rb') as f:
+    def delete_image(self, side_index):
+        deleted_path = self.current_pair[side_index]
+        surviving_path = self.current_pair[1 - side_index]
+        original_pair = list(self.current_pair)
+
+        # Capture pre-vote state for undo
+        pre_deleted_rating = self.image_ratings[deleted_path]
+        pre_deleted_matchups = self.image_matchups[deleted_path]
+        pre_deleted_mapping = self.image_mappings[deleted_path]
+        pre_deleted_index = self.images.index(deleted_path)
+        pre_surviving_path = surviving_path
+        pre_surviving_rating = self.image_ratings[surviving_path]
+        pre_surviving_matchups = self.image_matchups[surviving_path]
+        pre_deck = list(self._deck)
+        pre_previous_pair = list(self.previous_pair)
+        pre_action_count = self.session_action_count
+        pre_duration = self.session_total_duration
+
+        # Count as a vote: surviving image wins, deleted image loses
+        self.image_matchups[surviving_path] += 1
+        self.image_matchups[deleted_path] += 1
+        self.update_elo_ratings(surviving_path, deleted_path)
+
+        # Paths changed due to rename — refresh from current_pair
+        deleted_path = self.current_pair[side_index]
+        surviving_path = self.current_pair[1 - side_index]
+
+        # Read file bytes before deletion
+        with open(deleted_path, 'rb') as f:
             file_bytes = f.read()
+
         undo = {
             "type": "delete",
-            "pair": list(self.current_pair),
-            "deleted_path": image_path,
+            "pair": original_pair,
             "file_bytes": file_bytes,
-            "rating": self.image_ratings[image_path],
-            "matchups": self.image_matchups[image_path],
-            "mapping": self.image_mappings[image_path],
-            "index_in_images": self.images.index(image_path),
-            "deck": list(self._deck),
-            "previous_pair": list(self.previous_pair),
-            "session_action_count": self.session_action_count,
-            "session_total_duration": self.session_total_duration,
+            "deleted_pre_path": original_pair[side_index],
+            "deleted_pre_rating": pre_deleted_rating,
+            "deleted_pre_matchups": pre_deleted_matchups,
+            "deleted_pre_mapping": pre_deleted_mapping,
+            "deleted_index_in_images": pre_deleted_index,
+            "surviving_post_path": surviving_path,
+            "surviving_pre_path": pre_surviving_path,
+            "surviving_pre_rating": pre_surviving_rating,
+            "surviving_pre_matchups": pre_surviving_matchups,
+            "deck": pre_deck,
+            "previous_pair": pre_previous_pair,
+            "session_action_count": pre_action_count,
+            "session_total_duration": pre_duration,
         }
 
         # Remove from all data structures
-        self.images.remove(image_path)
-        del self.image_ratings[image_path]
-        del self.image_matchups[image_path]
-        del self.image_mappings[image_path]
-        if image_path in self._deck:
-            self._deck.remove(image_path)
+        self.images.remove(deleted_path)
+        del self.image_ratings[deleted_path]
+        del self.image_matchups[deleted_path]
+        del self.image_mappings[deleted_path]
+        if deleted_path in self._deck:
+            self._deck.remove(deleted_path)
 
         # Delete file from disk
-        os.remove(image_path)
-        print(f"Deleted: {os.path.basename(image_path)}")
+        os.remove(deleted_path)
+        print(f"Deleted: {os.path.basename(deleted_path)}")
 
         # Update mappings file
         self.update_mappings_file()
