@@ -18,6 +18,7 @@ Images are displayed in pairs and you vote for the better one. Elo ratings are s
 |-----|--------|
 | `←` / `→` | Vote for the left / right image |
 | `Ctrl+←` / `Ctrl+→` | Delete the left / right image |
+| `Delete` | Delete both images |
 | `Backspace` | Undo the last vote or delete |
 | `Space` | Skip the current pair |
 | `Escape` | Exit |
@@ -31,7 +32,9 @@ Images are displayed in pairs and you vote for the better one. Elo ratings are s
 
 Press `Ctrl+←` or `Ctrl+→` to mark an image for deletion. The selected image dims to 50% brightness and a confirmation dialog appears. Confirming removes the file from disk and from the competition entirely. If the pool drops to fewer than 2 images after a deletion the session ends gracefully.
 
-This mode is useful for culling: repeatedly delete the weaker image until you are left with only the ones worth keeping.
+Press `Delete` to delete both images at once. Both images dim and a confirmation dialog appears. This is handy when neither image in the pair is worth keeping.
+
+This mode is useful for culling: repeatedly delete the weaker image (or both) until you are left with only the ones worth keeping.
 
 ## Undo
 

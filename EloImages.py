@@ -15,6 +15,7 @@ How to Use:
    - Right Arrow: Vote for the right image
    - Ctrl+Left: Delete the left image (with confirmation)
    - Ctrl+Right: Delete the right image (with confirmation)
+   - Delete: Delete both images (with confirmation)
 6. The Elo ratings will be updated after each vote, and the images will be renamed to reflect their current Elo ratings.
 7. When deleting an image, the image will dim to indicate selection, and a confirmation dialog will appear.
    Confirming deletion removes the image from disk and from the competition. The progress indicator updates accordingly.
@@ -79,6 +80,7 @@ class ImageEloApp:
         self.root.bind('<Control-Left>', lambda e: self.confirm_delete(0))  # Delete left image
         self.root.bind('<Control-Right>', lambda e: self.confirm_delete(1))  # Delete right image
         self.root.bind('<BackSpace>', lambda e: self.undo())  # Undo last action
+        self.root.bind('<Delete>', lambda e: self.confirm_delete_both())  # Delete both images
 
         self.center_frame = tk.Frame(self.root, bg='black')
         self.center_frame.pack(expand=True)
@@ -259,6 +261,8 @@ class ImageEloApp:
             self._undo_vote(state)
         elif state["type"] == "delete":
             self._undo_delete(state)
+        elif state["type"] == "delete_both":
+            self._undo_delete_both(state)
 
     def _undo_vote(self, state):
         # Rename files back to pre-vote paths
@@ -312,6 +316,31 @@ class ImageEloApp:
         self.update_image(self.right_label, self.current_pair[1])
         self.pair_display_time = time.time()
         print(f"Undid delete. Restored: {os.path.basename(path)}")
+
+    def _undo_delete_both(self, state):
+        # Restore both files in original order (reverse so indices stay valid)
+        for entry in reversed(state["entries"]):
+            path = entry["deleted_path"]
+            with open(path, 'wb') as f:
+                f.write(entry["file_bytes"])
+            self.images.insert(entry["index_in_images"], path)
+            self.image_ratings[path] = entry["rating"]
+            self.image_matchups[path] = entry["matchups"]
+            self.image_mappings[path] = entry["mapping"]
+
+        self._deck = list(state["deck"])
+        self.previous_pair = list(state["previous_pair"])
+        self.session_action_count = state["session_action_count"]
+        self.session_total_duration = state["session_total_duration"]
+        self.update_mappings_file()
+        self.update_progress_label()
+
+        self.current_pair = list(state["pair"])
+        self.update_image(self.left_label, self.current_pair[0])
+        self.update_image(self.right_label, self.current_pair[1])
+        self.pair_display_time = time.time()
+        names = [os.path.basename(p) for p in state["pair"]]
+        print(f"Undid delete-both. Restored: {names[0]}, {names[1]}")
 
     def vote_winner(self, winner_index):
         if not self.current_pair:
@@ -416,6 +445,88 @@ class ImageEloApp:
             # Restore original image
             label.config(image=original_photo)
             label.image = original_photo
+
+    def confirm_delete_both(self):
+        if not self.current_pair:
+            return
+
+        # Dim both images to 50% brightness
+        original_photos = []
+        for side_index in range(2):
+            image_path = self.current_pair[side_index]
+            label = self.left_label if side_index == 0 else self.right_label
+            img = Image.open(image_path)
+            img.thumbnail((self.root.winfo_screenwidth() // 2, self.root.winfo_screenheight()), Image.LANCZOS)
+            enhancer = ImageEnhance.Brightness(img)
+            dimmed = enhancer.enhance(0.5)
+            dimmed_photo = ImageTk.PhotoImage(dimmed)
+            original_photos.append(label.image)
+            label.config(image=dimmed_photo)
+            label.image = dimmed_photo
+        self.root.update()
+
+        result = messagebox.askyesno("Confirm Delete", "Delete BOTH images?")
+
+        if result:
+            self.delete_both_images()
+        else:
+            # Restore original images
+            self.left_label.config(image=original_photos[0])
+            self.left_label.image = original_photos[0]
+            self.right_label.config(image=original_photos[1])
+            self.right_label.image = original_photos[1]
+
+    def delete_both_images(self):
+        pair = list(self.current_pair)
+
+        # Capture undo state for both images
+        undo_entries = []
+        for image_path in pair:
+            with open(image_path, 'rb') as f:
+                file_bytes = f.read()
+            undo_entries.append({
+                "deleted_path": image_path,
+                "file_bytes": file_bytes,
+                "rating": self.image_ratings[image_path],
+                "matchups": self.image_matchups[image_path],
+                "mapping": self.image_mappings[image_path],
+                "index_in_images": self.images.index(image_path),
+            })
+
+        undo = {
+            "type": "delete_both",
+            "pair": pair,
+            "entries": undo_entries,
+            "deck": list(self._deck),
+            "previous_pair": list(self.previous_pair),
+            "session_action_count": self.session_action_count,
+            "session_total_duration": self.session_total_duration,
+        }
+
+        # Remove both from all data structures and disk
+        for image_path in pair:
+            self.images.remove(image_path)
+            del self.image_ratings[image_path]
+            del self.image_matchups[image_path]
+            del self.image_mappings[image_path]
+            if image_path in self._deck:
+                self._deck.remove(image_path)
+            os.remove(image_path)
+            print(f"Deleted: {os.path.basename(image_path)}")
+
+        self.update_mappings_file()
+
+        if len(self.images) < 2:
+            messagebox.showinfo("Session Complete", f"Only {len(self.images)} image(s) remaining. Exiting.")
+            self.root.quit()
+            return
+
+        self.previous_pair = []
+        self._record_action()
+        self.update_progress_label()
+        self.display_images()
+
+        self._undo_state = undo
 
     def delete_image(self, image_path):
         # Capture undo state before deleting
