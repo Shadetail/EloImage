@@ -16,6 +16,8 @@ How to Use:
    - Ctrl+Left: Delete the left image (with confirmation)
    - Ctrl+Right: Delete the right image (with confirmation)
    - Delete: Delete both images (with confirmation)
+   - =: Toggle equalize mode (downscale larger image to match smaller's megapixels)
+   - +/-: Zoom in/out by 10%
 6. The Elo ratings will be updated after each vote, and the images will be renamed to reflect their current Elo ratings.
 7. When deleting an image, the image will dim to indicate selection, and a confirmation dialog will appear.
    Confirming deletion counts as a vote for the surviving image (its Elo rating increases), then removes the
@@ -64,6 +66,8 @@ class ImageEloApp:
         self.session_action_count = 0
         self.session_total_duration = 0.0
         self.pair_display_time = None
+        self._equalize_mode = False  # Downscale larger image to smaller's megapixels
+        self._zoom_level = 1.0  # Canvas zoom multiplier
 
         self.setup_gui()
         if not os.path.isdir(self.elo_folder_path):
@@ -82,6 +86,11 @@ class ImageEloApp:
         self.root.bind('<Control-Right>', lambda e: self.confirm_delete(1))  # Delete right image
         self.root.bind('<BackSpace>', lambda e: self.undo())  # Undo last action
         self.root.bind('<Delete>', lambda e: self.confirm_delete_both())  # Delete both images
+        self.root.bind('<equal>', lambda e: self.toggle_equalize())  # Equalize megapixels
+        self.root.bind('<plus>', lambda e: self.zoom_in())  # Zoom in
+        self.root.bind('<KP_Add>', lambda e: self.zoom_in())
+        self.root.bind('<minus>', lambda e: self.zoom_out())  # Zoom out
+        self.root.bind('<KP_Subtract>', lambda e: self.zoom_out())
 
         self.center_frame = tk.Frame(self.root, bg='black')
         self.center_frame.pack(expand=True)
@@ -97,6 +106,12 @@ class ImageEloApp:
         self.count_label.pack(pady=(8, 0))
         self.progress_label = tk.Label(self.bottom_frame, text="", fg="#666666", bg="black")
         self.progress_label.pack(pady=(0, 8))
+
+        # Corner indicators
+        self.zoom_label = tk.Label(self.root, text="", fg="#666666", bg="black")
+        self.zoom_label.place(relx=0.0, rely=1.0, anchor="sw", x=8, y=-8)
+        self.equalize_label = tk.Label(self.root, text="", fg="#666666", bg="black")
+        self.equalize_label.place(relx=1.0, rely=1.0, anchor="se", x=-8, y=-8)
 
     def check_and_initialize(self):
         if os.path.exists(self.mappings_file):
@@ -177,17 +192,54 @@ class ImageEloApp:
         print(f"Selected pair: {current_ids}")  # Debug print
 
         self.previous_pair = self.current_pair
-        self.update_image(self.left_label, self.current_pair[0])
-        self.update_image(self.right_label, self.current_pair[1])
+        self._refresh_display()
         self.pair_display_time = time.time()
+
+    def _get_equalize_mp(self):
+        """Return the target pixel count for equalize mode, or None if off."""
+        if not self._equalize_mode or not self.current_pair:
+            return None
+        sizes = []
+        for path in self.current_pair:
+            with Image.open(path) as img:
+                sizes.append(img.width * img.height)
+        return min(sizes)
+
+    def _refresh_display(self):
+        """Re-render the current pair with current equalize/zoom settings."""
+        if not self.current_pair:
+            return
+        equalize_mp = self._get_equalize_mp()
+        self.update_image(self.left_label, self.current_pair[0], equalize_mp)
+        self.update_image(self.right_label, self.current_pair[1], equalize_mp)
 
     def get_identifier(self, path):
         return os.path.splitext(os.path.basename(path))[0].split('_')[1]
 
-    def update_image(self, label, image_path):
+    def update_image(self, label, image_path, equalize_mp=None, brightness=1.0):
         print("Updating image:", self.get_identifier(image_path))  # Debug statement
         img = Image.open(image_path)
-        img.thumbnail((self.root.winfo_screenwidth() // 2, self.root.winfo_screenheight()), Image.LANCZOS)
+
+        # Equalize: downscale larger image to match smaller's megapixels
+        if equalize_mp is not None:
+            native_mp = img.width * img.height
+            if native_mp > equalize_mp:
+                scale = math.sqrt(equalize_mp / native_mp)
+                img = img.resize((max(1, int(img.width * scale)),
+                                  max(1, int(img.height * scale))), Image.BILINEAR)
+
+        # Fit to screen (no upscale at base zoom), then apply zoom
+        base_w = self.root.winfo_screenwidth() // 2
+        base_h = self.root.winfo_screenheight()
+        ratio = min(base_w / img.width, base_h / img.height, 1.0)
+        final_w = max(1, int(img.width * ratio * self._zoom_level))
+        final_h = max(1, int(img.height * ratio * self._zoom_level))
+        img = img.resize((final_w, final_h), Image.LANCZOS)
+
+        if brightness != 1.0:
+            enhancer = ImageEnhance.Brightness(img)
+            img = enhancer.enhance(brightness)
+
         photo = ImageTk.PhotoImage(img)
         label.config(image=photo)
         label.image = photo
@@ -250,6 +302,27 @@ class ImageEloApp:
         print("Skipping matchup...")  # Debug print
         self.display_images(skip_attempts)
 
+    def toggle_equalize(self):
+        self._equalize_mode = not self._equalize_mode
+        self.equalize_label.config(text="=" if self._equalize_mode else "")
+        self._refresh_display()
+
+    def zoom_in(self):
+        self._zoom_level = round(self._zoom_level + 0.1, 1)
+        self._update_zoom_label()
+        self._refresh_display()
+
+    def zoom_out(self):
+        self._zoom_level = max(0.1, round(self._zoom_level - 0.1, 1))
+        self._update_zoom_label()
+        self._refresh_display()
+
+    def _update_zoom_label(self):
+        if self._zoom_level == 1.0:
+            self.zoom_label.config(text="")
+        else:
+            self.zoom_label.config(text=f"{int(self._zoom_level * 100)}%")
+
     def undo(self):
         if self._undo_state is None:
             print("Nothing to undo.")
@@ -286,8 +359,7 @@ class ImageEloApp:
 
         # Re-display the original pair
         self.current_pair = list(state["pre_paths"])
-        self.update_image(self.left_label, self.current_pair[0])
-        self.update_image(self.right_label, self.current_pair[1])
+        self._refresh_display()
         self.pair_display_time = time.time()
         print(f"Undid vote. Restored pair: {[self.get_identifier(p) for p in self.current_pair]}")
 
@@ -323,8 +395,7 @@ class ImageEloApp:
 
         # Re-display the original pair
         self.current_pair = list(state["pair"])
-        self.update_image(self.left_label, self.current_pair[0])
-        self.update_image(self.right_label, self.current_pair[1])
+        self._refresh_display()
         self.pair_display_time = time.time()
         print(f"Undid delete. Restored: {os.path.basename(pre_path)}")
 
@@ -347,8 +418,7 @@ class ImageEloApp:
         self.update_progress_label()
 
         self.current_pair = list(state["pair"])
-        self.update_image(self.left_label, self.current_pair[0])
-        self.update_image(self.right_label, self.current_pair[1])
+        self._refresh_display()
         self.pair_display_time = time.time()
         names = [os.path.basename(p) for p in state["pair"]]
         print(f"Undid delete-both. Restored: {names[0]}, {names[1]}")
@@ -432,19 +502,13 @@ class ImageEloApp:
     def confirm_delete(self, side_index):
         if not self.current_pair:
             return
-        image_path = self.current_pair[side_index]
         label = self.left_label if side_index == 0 else self.right_label
         side_name = "LEFT" if side_index == 0 else "RIGHT"
 
         # Dim the image to 50% brightness
-        img = Image.open(image_path)
-        img.thumbnail((self.root.winfo_screenwidth() // 2, self.root.winfo_screenheight()), Image.LANCZOS)
-        enhancer = ImageEnhance.Brightness(img)
-        dimmed = enhancer.enhance(0.5)
-        dimmed_photo = ImageTk.PhotoImage(dimmed)
         original_photo = label.image
-        label.config(image=dimmed_photo)
-        label.image = dimmed_photo
+        equalize_mp = self._get_equalize_mp()
+        self.update_image(label, self.current_pair[side_index], equalize_mp, brightness=0.5)
         self.root.update()
 
         # Show confirmation dialog
@@ -462,18 +526,11 @@ class ImageEloApp:
             return
 
         # Dim both images to 50% brightness
-        original_photos = []
+        equalize_mp = self._get_equalize_mp()
+        original_photos = [self.left_label.image, self.right_label.image]
         for side_index in range(2):
-            image_path = self.current_pair[side_index]
             label = self.left_label if side_index == 0 else self.right_label
-            img = Image.open(image_path)
-            img.thumbnail((self.root.winfo_screenwidth() // 2, self.root.winfo_screenheight()), Image.LANCZOS)
-            enhancer = ImageEnhance.Brightness(img)
-            dimmed = enhancer.enhance(0.5)
-            dimmed_photo = ImageTk.PhotoImage(dimmed)
-            original_photos.append(label.image)
-            label.config(image=dimmed_photo)
-            label.image = dimmed_photo
+            self.update_image(label, self.current_pair[side_index], equalize_mp, brightness=0.5)
         self.root.update()
 
         result = messagebox.askyesno("Confirm Delete", "Delete BOTH images?")

@@ -19,6 +19,8 @@ Images are displayed in pairs and you vote for the better one. Elo ratings are s
 | `←` / `→` | Vote for the left / right image |
 | `Ctrl+←` / `Ctrl+→` | Delete the left / right image |
 | `Delete` | Delete both images |
+| `=` | Toggle equalize mode |
+| `+` / `-` | Zoom in / out (10% per step) |
 | `Backspace` | Undo the last vote or delete |
 | `Space` | Skip the current pair |
 | `Escape` | Exit |
@@ -35,6 +37,14 @@ Press `Ctrl+←` or `Ctrl+→` to mark an image for deletion. The selected image
 Press `Delete` to delete both images at once. Both images dim and a confirmation dialog appears. This is handy when neither image in the pair is worth keeping.
 
 This mode is useful for culling: repeatedly delete the weaker image (or both) until you are left with only the ones worth keeping.
+
+## Equalize Mode
+
+Press `=` to toggle equalize mode. When active, the larger image (by megapixel count) is downscaled using bilinear resampling to match the smaller image's resolution before being fitted to screen. This lets you compare images at the same effective quality without the higher-resolution image having an unfair visual advantage. A small `=` indicator appears in the bottom-right corner while the mode is on.
+
+## Zoom
+
+Press `+` to zoom in and `-` to zoom out (10% per step). Both images scale together. The current zoom level (e.g. `110%`) is shown in the bottom-left corner whenever it differs from the default 100%. Equalize mode, zoom, and all other view settings persist across votes and pair changes.
 
 ## Undo
 
