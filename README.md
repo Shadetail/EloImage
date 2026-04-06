@@ -22,13 +22,17 @@ Images are displayed in pairs and you vote for the better one. Elo ratings are s
 | `=` | Toggle equalize mode |
 | `+` / `-` | Zoom in / out (10% per step) |
 | `Backspace` | Undo the last vote or delete |
-| `Space` | Skip the current pair |
+| `Space` | Skip the current pair (treated as a draw) |
 | `Escape` | Exit |
 
 ## Voting
 
 - After each vote the Elo ratings of both images are updated and the files are renamed accordingly.
 - Pairs are drawn from a shuffled deck of all images. Every image appears once before any image repeats, ensuring maximum variety and preventing the same image from showing up back-to-back.
+
+## Skipping (Draw)
+
+Pressing `Space` skips the current pair but treats it as a **draw** rather than ignoring it. Both images receive Elo adjustments as if neither won: a high-rated image paired with a low-rated one will lose points while the low-rated one gains, proportional to the gap between them. If both ratings are already close, the adjustment is negligible. This captures the signal that two images are roughly comparable without forcing a winner. Skips count as matchups and can be undone with `Backspace`.
 
 ## Deleting Images
 

@@ -23,7 +23,9 @@ How to Use:
    Confirming deletion counts as a vote for the surviving image (its Elo rating increases), then removes the
    deleted image from disk and from the competition. The progress indicator updates accordingly.
 8. If the script detects that either of the images in the current pair was in the previous pair, it will automatically skip to a new pair.
-9. You can manually skip a pair by pressing the Spacebar.
+9. You can skip a pair by pressing the Spacebar. Skipping treats the pair as a draw: ratings are
+   pulled toward each other proportionally to the gap between them (large gap = large adjustment,
+   equal ratings = no change). This counts as a matchup for both images.
 10. To exit the script, press the Escape key.
 11. A small progress indicator appears at the bottom-center in the form "A / B": A is the total number of pairwise votes cast so far in this folder, and B is a theoretical lower bound on the number of pairwise votes needed to fully order n images, computed as ceil(log2(n!)). The numbers update after each vote.
 
@@ -299,8 +301,42 @@ class ImageEloApp:
             self.progress_label.config(text=text)
 
     def skip_matchup(self, skip_attempts=0):
-        print("Skipping matchup...")  # Debug print
+        if not self.current_pair:
+            return
+
+        pair = list(self.current_pair)
+        pre_ratings = {p: self.image_ratings[p] for p in pair}
+        pre_matchups = {p: self.image_matchups[p] for p in pair}
+        pre_deck = list(self._deck)
+        pre_previous_pair = list(self.previous_pair)
+        pre_action_count = self.session_action_count
+        pre_duration = self.session_total_duration
+
+        # Treat skip as a draw
+        self.image_matchups[pair[0]] += 1
+        self.image_matchups[pair[1]] += 1
+        self.update_elo_draw(pair[0], pair[1])
+
+        post_paths = list(self.current_pair)
+
+        self.update_mappings_file()
+        self._record_action()
+        self.update_progress_label()
+
+        print(f"Skipping matchup (draw): {[self.get_identifier(p) for p in post_paths]}")
         self.display_images(skip_attempts)
+
+        self._undo_state = {
+            "type": "vote",
+            "pre_paths": pair,
+            "post_paths": post_paths,
+            "pre_ratings": pre_ratings,
+            "pre_matchups": pre_matchups,
+            "deck": pre_deck,
+            "previous_pair": pre_previous_pair,
+            "session_action_count": pre_action_count,
+            "session_total_duration": pre_duration,
+        }
 
     def toggle_equalize(self):
         self._equalize_mode = not self._equalize_mode
@@ -474,6 +510,18 @@ class ImageEloApp:
         self.image_ratings[loser] += k * (0 - expected_loser)
         self.rename_image(winner, self.image_ratings[winner])
         self.rename_image(loser, self.image_ratings[loser])
+
+    def update_elo_draw(self, image_a, image_b, k=32):
+        rating_a = self.image_ratings[image_a]
+        rating_b = self.image_ratings[image_b]
+
+        expected_a = 1 / (1 + 10 ** ((rating_b - rating_a) / 400))
+        expected_b = 1 / (1 + 10 ** ((rating_a - rating_b) / 400))
+
+        self.image_ratings[image_a] += k * (0.5 - expected_a)
+        self.image_ratings[image_b] += k * (0.5 - expected_b)
+        self.rename_image(image_a, self.image_ratings[image_a])
+        self.rename_image(image_b, self.image_ratings[image_b])
 
     def rename_image(self, path, new_rating):
         dirname, filename = os.path.split(path)
