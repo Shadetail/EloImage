@@ -168,14 +168,25 @@ class ImageEloApp:
         self.display_images()
 
     def _refill_deck(self):
-        """Reshuffle all images into the deck, pushing recently-seen images to the end."""
+        """Reshuffle all images into the deck, avoiding an immediate repeat of the last pair."""
         deck = list(self.images)
         random.shuffle(deck)
-        # Move recently-shown images to the end so they appear last
-        for img in self.previous_pair:
-            if img in deck:
-                deck.remove(img)
-                deck.append(img)
+        # Only the first pair after a refill can repeat a just-shown image, so fix up
+        # the first two slots. Pinning the previous pair to fixed deck positions
+        # instead (e.g. the end) would lock small pools into the same pairings every
+        # cycle, preventing some images from ever meeting.
+        if len(deck) >= 5 and self.previous_pair:
+            # Enough images: keep both members of the previous pair out of the next pair.
+            for i in range(2):
+                if deck[i] in self.previous_pair:
+                    candidates = [j for j in range(2, len(deck)) if deck[j] not in self.previous_pair]
+                    j = random.choice(candidates)
+                    deck[i], deck[j] = deck[j], deck[i]
+        elif len(deck) >= 3 and set(deck[:2]) == set(self.previous_pair):
+            # With 3-4 images, banning both members would force the same two pairs to
+            # alternate forever; only prevent showing the identical pair twice in a row.
+            j = random.randrange(2, len(deck))
+            deck[1], deck[j] = deck[j], deck[1]
         self._deck = deck
 
     def _draw_pair(self):
